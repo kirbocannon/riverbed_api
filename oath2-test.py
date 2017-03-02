@@ -60,7 +60,8 @@ def do_request(host, url, data=None, headers=None):
     return r
 
 
-def main(argv):
+def main():
+
     # ENTER HERE
     # First thing I am doing is a bit of simple argparse. This just
     # allows the sample script to take in arguments with very little code.
@@ -118,7 +119,7 @@ def main(argv):
     # Now that our data is prepped lets make the request
     # I am going to use json.loads to parse the data returned
     # so I add an Accept header indicating I want JSON back.
-    oauth_netpro = do_request(args.netprofiler_host,
+    oauth_netpro = do_request(args.netpro_host,
                               token_url,
                               data=data,
                               headers={'Accept': 'application/json'})
@@ -273,4 +274,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-   main(sys.argv[1:])
+   main()
