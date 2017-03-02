@@ -69,6 +69,7 @@ def main():
     parser.add_argument('-n', '--netpro-host',
                         help ='NetProfiler host name or IP.',
                         type =str,
+                        default='',
                         metavar = 'netprofiler_host')
     parser.add_argument('-s', '--steelhead-host',
                         help ='Steelhead DNS Name or IP Address.',
@@ -92,6 +93,7 @@ def main():
                         help ='Disable Printing debug.',
                         action ='store_false')
     args = parser.parse_args()
+    print(args)
 
     # fetch the OAuth2 key from our test file
     with open(args.auth_code, 'r') as f:
@@ -106,6 +108,7 @@ def main():
     signature_encoded = ''
     assertion = '.'.join([header_encoded, oauth_code, signature_encoded])
     grant_type = 'access_code'
+    print(args.steelhead_host)
 
     # NetProfiler views the state variable as optional. Against a NetProfiler
     # this can be an empty sting. Steelhead requires this. Best to use it in
@@ -119,55 +122,57 @@ def main():
     # Now that our data is prepped lets make the request
     # I am going to use json.loads to parse the data returned
     # so I add an Accept header indicating I want JSON back.
-    oauth_netpro = do_request(args.netpro_host,
-                              token_url,
-                              data=data,
-                              headers={'Accept': 'application/json'})
-    # turn the result into python objects
-    oauth_netpro_obj = oauth_netpro.json()
+    if args.netpro_host:
+        oauth_netpro = do_request(args.netpro_host,
+                                  token_url,
+                                  data=data,
+                                  headers={'Accept': 'application/json'})
+        # turn the result into python objects
+        oauth_netpro_obj = oauth_netpro.json()
 
-    # check if something went wrong with the request
-    # This is just here as an example of ways you could catch failures in
-    # OAuth2 token requests. I am not going to repeat it is subsequent examples
-    if oauth_netpro_obj['state'] != state:
-        print("Inconsistent state value in OAuth response")
-        sys.exit(1)
+        # check if something went wrong with the request
+        # This is just here as an example of ways you could catch failures in
+        # OAuth2 token requests. I am not going to repeat it is subsequent examples
+        if oauth_netpro_obj['state'] != state:
+            print("Inconsistent state value in OAuth response")
+            sys.exit(1)
+        # NetProfiler has a url in its REST API that will return a list of
+        # the systems users. As an example of retrieving an authenticated URL
+        # we will use the token we just got to retrieve that list.
+        # This is a good test URL because it requires authentication
+        users_url = '/api/profiler/1.5/users'
 
-    if args.debug:
-        print("DEBUG: Our token is: {token}\n".format(token =
-                                               oauth_netpro_obj['access_token']))
-    # So now we have our token. Lets use it to make an authenticated request
+        # this request will have both an authentication and a 'Accept' header.
+        # The auth header is simply "Bearer <token_text>" in a string.
+        auth_hdr_data = 'Bearer {0}'.format(oauth_netpro_obj['access_token'])
+        auth_hdr = {'Authorization': auth_hdr_data,
+                    'Accept': 'application/json'}
 
-    # NetProfiler has a url in its REST API that will return a list of
-    # the systems users. As an example of retrieving an authenticated URL
-    # we will use the token we just got to retrieve that list.
-    # This is a good test URL because it requires authentication
-    users_url = '/api/profiler/1.5/users'
+        users_req = do_request(args.netpro_host,
+                               users_url,
+                               headers=auth_hdr)
 
-    # this request will have both an authentication and a 'Accept' header.
-    # The auth header is simply "Bearer <token_text>" in a string.
-    auth_hdr_data = 'Bearer {0}'.format(oauth_netpro_obj['access_token'])
-    auth_hdr = {'Authorization': auth_hdr_data,
-                'Accept': 'application/json'}
+        users_obj = users_req.json()
+        if args.debug:
+            print("DEBUG: Our token is: {token}\n".format(token =
+                                                   oauth_netpro_obj['access_token']))
+        # So now we have our token. Lets use it to make an authenticated request
 
-    users_req = do_request(args.netpro_host,
-                           users_url,
-                           headers=auth_hdr)
 
-    users_obj = users_req.json()
-    if args.debug:
-        print("DEBUG: There are {0} user(s) on {1}".format(len(users_obj),
-                                                           args.netpro_host))
-        for user in users_obj:
-            print ("User {username} - Auth Type: {authentication_type}, Role: "
-                   "{role}".format(username=user['username'],
-                               authentication_type=user['authentication_type'],
-                               role=user['role']))
-        print("\n")
+        if args.debug:
+            print("DEBUG: There are {0} user(s) on {1}".format(len(users_obj),
+                                                               args.netpro_host))
+            for user in users_obj:
+                print ("User {username} - Auth Type: {authentication_type}, Role: "
+                       "{role}".format(username=user['username'],
+                                   authentication_type=user['authentication_type'],
+                                   role=user['role']))
+            print("\n")
+
 
     # We can do the same thing against our Steelhead host as well.
     # if the steelhead_host has been defined lets try
-    if args.steelhead_host is not '':
+    if args.steelhead_host:
         # I am doing this to demonstrate how much of the above process is
         # identical on the Steelhead
         # The only real change is the authenticated URL we are going to fetch
@@ -238,39 +243,39 @@ def main():
         new_auth_code = local_header[6:].strip()
         new_auth_code = urllib.unquote(new_auth_code)
 
-    if new_auth_code != '':
-        # We got a code. Now we can use it. Lets see how many apps this
-        # NetProfiler has. Only comments on the deltas. We are going to use our
-        # new OAuth2 key to get a token and then get the protected apps
-        # url in the NetProfiler REST API. Same things we have done above
-
-        # Get the token. First redo the assertion because we have a new code
-        assertion = '.'.join([header_encoded, new_auth_code, signature_encoded])
-        # Rebuild the data now that we have a new assertion
-        data = {'grant_type': grant_type,
-                'assertion': assertion,
-                'state': state}
-
-        netpro_newtoken_req = do_request(args.netpro_host,
-                                         token_url,
-                                         data=data,
-                                         headers={'Accept': 'application/json'})
-
-        new_key_obj = netpro_newtoken_req.json()
-
-        # new token so new request headers
-        auth_hdr = {'Authorization': 'Bearer {0}'.format(
-                                                   new_key_obj['access_token']),
-                    'Accept': 'application/json'}
-        netpro_applist = do_request(args.netpro_host,
-                                         netpro_apps_url,
-                                         headers=auth_hdr)
-
-        netpro_applist_obj = netpro_applist.json()
-
-        if args.debug:
-            print ("DEBUG: There are {0} Apps defined on"
-                   " {1}".format(len(netpro_applist_obj), args.netpro_host))
+    # if new_auth_code != '':
+    #     # We got a code. Now we can use it. Lets see how many apps this
+    #     # NetProfiler has. Only comments on the deltas. We are going to use our
+    #     # new OAuth2 key to get a token and then get the protected apps
+    #     # url in the NetProfiler REST API. Same things we have done above
+    #
+    #     # Get the token. First redo the assertion because we have a new code
+    #     assertion = '.'.join([header_encoded, new_auth_code, signature_encoded])
+    #     # Rebuild the data now that we have a new assertion
+    #     data = {'grant_type': grant_type,
+    #             'assertion': assertion,
+    #             'state': state}
+    #
+    #     # netpro_newtoken_req = do_request(args.netpro_host,
+    #     #                                  token_url,
+    #     #                                  data=data,
+    #     #                                  headers={'Accept': 'application/json'})
+    #
+    #     # new_key_obj = netpro_newtoken_req.json()
+    #
+    #     # new token so new request headers
+    #     auth_hdr = {'Authorization': 'Bearer {0}'.format(
+    #                                                new_key_obj['access_token']),
+    #                 'Accept': 'application/json'}
+    #     netpro_applist = do_request(args.netpro_host,
+    #                                      netpro_apps_url,
+    #                                      headers=auth_hdr)
+    #
+    #     netpro_applist_obj = netpro_applist.json()
+    #
+    #     if args.debug:
+    #         print ("DEBUG: There are {0} Apps defined on"
+    #                " {1}".format(len(netpro_applist_obj), args.netpro_host))
 
 
 if __name__ == "__main__":
